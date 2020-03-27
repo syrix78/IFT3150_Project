@@ -75,7 +75,7 @@ public class Parser {
 			CodeGenerationUtils.mavenModuleRoot(Parser.class).resolve("."));
 	
 	private String filePath = new String();
-	private CompilationUnit cu = null;
+	public CompilationUnit cu = null;
 	
 	
 	
@@ -95,7 +95,7 @@ public class Parser {
 	//                        METHODS
 	//------------------------------------------------------------------------------
 	
-	public CompilationUnit visitStatements() throws IOException {
+	public CompilationUnit visitStatements(ArrayList<String> allowedCalls) throws IOException {
 	
 		ArrayList<MethodDeclaration> methods = new ArrayList<MethodDeclaration>();
 	
@@ -116,7 +116,7 @@ public class Parser {
 				MethodDeclaration currentMethod = n.clone();
 				ArrayList<MethodCallExpr> calls;
 				try {
-					calls = visitCalls(currentMethod);
+					calls = visitCalls(currentMethod, allowedCalls);
 					if(calls.size() > 1) {
 						methodMutator(currentMethod, calls);
 					}
@@ -140,7 +140,7 @@ public class Parser {
 	
 	}
 	
-	public ArrayList<MethodCallExpr> visitCalls(MethodDeclaration m) throws IOException {
+	public ArrayList<MethodCallExpr> visitCalls(MethodDeclaration m, ArrayList<String> allowedCalls) throws IOException {
 		
 		ArrayList<MethodCallExpr> calls = new ArrayList<MethodCallExpr>();
 	
@@ -150,8 +150,14 @@ public class Parser {
 			public Integer visit(MethodCallExpr n, ArrayList<MethodCallExpr> arg) {
 			
 					// Gets method name
-					String name = n.toString() ;
-					calls.add(n);		
+					String name = n.getNameAsString() ;
+					if(allowedCalls.contains(name)) {
+						calls.add(n);	
+					}
+					else {
+						//Used to disable the API call check feature
+						//calls.add(n);
+					}
 		
 					return super.visit(n, arg);
 	

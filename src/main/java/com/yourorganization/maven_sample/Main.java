@@ -31,14 +31,6 @@ public class Main {
 	// 									MAIN
 	// ------------------------------------------------------------------------------
 	public static void main(String[] args) throws Exception {
-		//Checks if path was entered
-		/*if(args.length == 0 || args[0] == null) {
-			System.out.println("Please enter the path of the folder you would like to parse!");
-			System.exit(1);
-		}
-		else {
-			pathToExplore=args[0];
-		}*/
 		pathToExplore = "C:\\Users\\Lucas\\Documents\\UDEM 2019-2020\\HIV 2020\\IFT3150\\jtar\\src\\main\\java\\org\\kamranzafar\\jtar";
 		searchThrough(new File(pathToExplore));
 		
@@ -49,11 +41,17 @@ public static void searchThrough(File node) throws Exception{
 		Parser samp;
 		String pathNode = node.getAbsolutePath();
 		
+		//For tests only
+		ArrayList<String> allowedCalls = new ArrayList<String>();
+		allowedCalls.add("getOctalBytes");
+		allowedCalls.add("arraycopy");
+		
 		if(pathNode.substring(pathNode.length()-5, pathNode.length()).equals(".java")) {
 			
 			samp = new Parser(pathNode);
-			CompilationUnit newCu = samp.visitStatements();
-
+			CompilationUnit old = samp.cu.clone();
+			CompilationUnit newCu = samp.visitStatements(allowedCalls);
+			int a = 0;
 				
 		}
 		
