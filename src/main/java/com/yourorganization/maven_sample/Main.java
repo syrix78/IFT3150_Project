@@ -10,6 +10,10 @@ import java.io.FileWriter;
 import java.text.NumberFormat;
 import java.text.DecimalFormat;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.io.IOException;
 import java.util.ArrayList;
 
@@ -46,13 +50,23 @@ public static void searchThrough(File node) throws Exception{
 		allowedCalls.add("getOctalBytes");
 		allowedCalls.add("arraycopy");
 		
+		Path filename = Paths.get(pathNode).getFileName();
+		
 		if(pathNode.substring(pathNode.length()-5, pathNode.length()).equals(".java")) {
 			
 			samp = new Parser(pathNode);
+			
+			ArrayList<MethodCallExpr> allowedAPICalls = samp.getAllowedCalls();
+			
 			CompilationUnit old = samp.cu.clone();
-			CompilationUnit newCu = samp.visitStatements(allowedCalls);
+			CompilationUnit newCu = samp.visitStatements(allowedAPICalls);
+			
+			File out = new File("output/" + filename.toString());
+			Files.write(out.toPath(), newCu.toString().getBytes());
+			String filePath = out.getAbsolutePath();
+			
 			int a = 0;
-				
+			
 		}
 		
 		if(node.isDirectory()){

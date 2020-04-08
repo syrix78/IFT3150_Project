@@ -7,6 +7,7 @@ package com.yourorganization.maven_sample;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.Range;
+import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
@@ -22,6 +23,7 @@ import com.github.javaparser.ast.comments.JavadocComment;
 import com.github.javaparser.ast.comments.LineComment;
 import com.github.javaparser.ast.expr.AssignExpr;
 import com.github.javaparser.ast.expr.BinaryExpr;
+import com.github.javaparser.ast.expr.ClassExpr;
 import com.github.javaparser.ast.expr.ConditionalExpr;
 import com.github.javaparser.ast.expr.EnclosedExpr;
 import com.github.javaparser.ast.expr.LambdaExpr;
@@ -43,10 +45,20 @@ import com.github.javaparser.ast.visitor.GenericVisitorAdapter;
 import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+import com.github.javaparser.resolution.UnsolvedSymbolException;
+import com.github.javaparser.resolution.types.ResolvedType;
+import com.github.javaparser.symbolsolver.JavaSymbolSolver;
+import com.github.javaparser.symbolsolver.model.resolution.TypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import com.github.javaparser.utils.CodeGenerationUtils;
 import com.github.javaparser.utils.SourceRoot;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -69,15 +81,21 @@ public class Parser {
 	// 							VARIABLES
 	// ------------------------------------------------------------------------------
 	
-	JavaParser javaparser = new JavaParser();
+	TypeSolver typeSolver = new ReflectionTypeSolver();
+	JavaSymbolSolver symbolSolver = new JavaSymbolSolver(typeSolver);
 
-	SourceRoot sourceRoot = new SourceRoot(
-			CodeGenerationUtils.mavenModuleRoot(Parser.class).resolve("."));
+	
+
 	
 	private String filePath = new String();
 	public CompilationUnit cu = null;
 	
+	FileWriter mutationLogFile = null;
 	
+	
+	ArrayList<SwapMutation> swaps = new ArrayList<SwapMutation>();
+	
+	private String callsDictPath = "calls.dict";
 	
 	// ------------------------------------------------------------------------------
 	// 							CONSTRUCTOR
@@ -87,22 +105,47 @@ public class Parser {
 	 * @param filePath
 	 */
 	public Parser(String filePath) {
-		cu = sourceRoot.parse("", filePath);
+		//cu = sourceRoot.parse("", filePath);
 		this.filePath = filePath;
+		
+		StaticJavaParser.getConfiguration().setSymbolResolver(this.symbolSolver);
+		try {
+			cu = StaticJavaParser.parse(new File(filePath));
+		} catch (FileNotFoundException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		
+		try {
+			String fileName = "output/" + cu.getStorage().get().getFileName() + "_mutationLog.csv";
+			this.mutationLogFile = new FileWriter(fileName);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		
 	}
 	
 	//------------------------------------------------------------------------------
 	//                        METHODS
 	//------------------------------------------------------------------------------
 	
-	public CompilationUnit visitStatements(ArrayList<String> allowedCalls) throws IOException {
+	public CompilationUnit visitStatements(ArrayList<MethodCallExpr> allowedCalls) throws IOException {
+		
+		 //cu.findAll(MethodCallExpr.class).forEach(mce ->
+		 //mce.resolve().getSignature()));
+		
+		
+		ArrayList<MethodCallExpr> allowedCallsTest = (ArrayList<MethodCallExpr>) allowedCalls.clone();
+		
 	
 		ArrayList<MethodDeclaration> methods = new ArrayList<MethodDeclaration>();
 	
-		CompilationUnit cu_no_comments2 = this.sourceRoot.parse("", this.filePath);
-		removeComments(cu_no_comments2);
+		removeComments(cu);
 		
-		cu_no_comments2.accept(new ModifierVisitor<ArrayList<MethodDeclaration>>() {
+		
+		cu.accept(new ModifierVisitor<ArrayList<MethodDeclaration>>() {
 			
 			@Override
 			public MethodDeclaration visit(MethodDeclaration n, ArrayList<MethodDeclaration> arg) {
@@ -135,23 +178,25 @@ public class Parser {
 			}
 	
 		}, methods);
-	
-		return cu_no_comments2;
+		this.logMutations();
+		return cu;
 	
 	}
 	
-	public ArrayList<MethodCallExpr> visitCalls(MethodDeclaration m, ArrayList<String> allowedCalls) throws IOException {
+	public ArrayList<MethodCallExpr> visitCalls(MethodDeclaration m, ArrayList<MethodCallExpr> allowedCalls) throws IOException {
 		
 		ArrayList<MethodCallExpr> calls = new ArrayList<MethodCallExpr>();
-	
+		
 		m.accept(new GenericVisitorAdapter<Integer, ArrayList<MethodCallExpr>>() {
 			
 			@Override
 			public Integer visit(MethodCallExpr n, ArrayList<MethodCallExpr> arg) {
 			
 					// Gets method name
-					String name = n.getNameAsString() ;
-					if(allowedCalls.contains(name)) {
+					String name = n.getNameAsString();
+					
+					
+					if(allowedCalls.contains(n)) {
 						calls.add(n);	
 					}
 					else {
@@ -169,12 +214,45 @@ public class Parser {
 	
 	}
 	
+	public ArrayList<MethodCallExpr> getAllowedCalls() throws IOException {
+		
+		ArrayList<String> APICalls = this.getAPICalls();
+		
+		ArrayList<MethodCallExpr> calls = new ArrayList<MethodCallExpr>();
+		
+		this.cu.accept(new GenericVisitorAdapter<Integer, ArrayList<MethodCallExpr>>() {
+			
+			@Override
+			public Integer visit(MethodCallExpr n, ArrayList<MethodCallExpr> arg) {
+			
+					// Gets method name
+					String name = n.getNameAsString();
+					try {
+						String signature = n.resolve().getQualifiedSignature();
+						String APICall = signature.substring(0, signature.indexOf("." + name + "(")) + "#" + name;
+						if(APICalls.contains(APICall)) {
+							calls.add(n.clone());
+						}
+					}catch(UnsolvedSymbolException e) {
+						
+					}
+		
+					return super.visit(n, arg);
+	
+			}
+	
+		}, calls);
+	
+		return calls;
+	
+	}
+	
 	public MethodDeclaration methodMutator(MethodDeclaration m, ArrayList<MethodCallExpr> calls) throws IOException {
 		
 		ArrayList<MethodCallExpr> mutantCalls = (ArrayList<MethodCallExpr>) calls.clone();
 		MethodDeclaration method = m;
 		
-		Integer[] blank = null;
+		ArrayList<SwapMutation> swaps = new ArrayList<SwapMutation>();
 		
 		method.accept(new ModifierVisitor<MethodDeclaration>() {
 			
@@ -186,6 +264,7 @@ public class Parser {
 					// Gets method name
 					String name = n.toString() ;
 					
+					
 					ArrayList<MethodCallExpr> newCalls = (ArrayList<MethodCallExpr>) calls.clone();
 					newCalls.remove(n);
 					
@@ -193,6 +272,12 @@ public class Parser {
 						int randomIndex = (int) Math.random() * newCalls.size();
 						MethodCallExpr mutant = newCalls.get(randomIndex);
 						mutantCalls.remove(mutant);
+						
+
+						SwapMutation callSwap = new SwapMutation(cu.getStorage().get().getFileName(), n, mutant);
+						swaps.add(callSwap);
+					
+						
 						return mutant;
 					}
 					else {
@@ -205,9 +290,69 @@ public class Parser {
 	
 		}, method);
 		
+		this.swaps.addAll(swaps);
 	
 		return method;
 	
+	}
+	
+	private void logMutations() {
+		// Our example data
+
+		FileWriter csvWriter = this.mutationLogFile;
+		try {
+			csvWriter.append("File Name");
+			csvWriter.append(",");
+			csvWriter.append("Edited Line Number");
+			csvWriter.append(",");
+			csvWriter.append("Edited Call");
+			csvWriter.append(",");
+			csvWriter.append("Swaped Line Number");
+			csvWriter.append(",");
+			csvWriter.append("New Call");
+			csvWriter.append("\n");
+		
+			this.swaps.forEach((swap) ->{
+				String lineContent = String.format("%s, %s, %s, %s, %s", swap.getJavaFile(), swap.getEditedLine(), swap.getEditedMethod(), swap.getSwapedLineNumber(), swap.getNewCall());
+				try {
+					csvWriter.append(lineContent);
+					csvWriter.append("\n");
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				
+			});
+			
+			
+			csvWriter.flush();
+			csvWriter.close();
+		}catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
+	
+	private ArrayList<String> getAPICalls() {
+		
+		ArrayList<String> APICalls = new ArrayList<String>();
+		
+		//https://www.javatpoint.com/how-to-read-file-line-by-line-in-java
+		try  {  
+			File file=new File(this.callsDictPath);    //creates a new file instance  
+			FileReader fr=new FileReader(file);   //reads the file  
+			BufferedReader br=new BufferedReader(fr);  //creates a buffering character input stream  
+			String line;  
+		while((line=br.readLine())!=null){  
+			APICalls.add(line.replace(" ", ""));      
+		}  
+			fr.close();    //closes the stream and release the resources  
+			 
+		}catch(IOException e)  {  
+			e.printStackTrace();  
+		}
+		
+		return APICalls;
 	}
 	
 	// https://stackoverflow.com/questions/31828851/how-to-write-a-java-program-to-filter-all-commented-lines-and-print-only-java-co
