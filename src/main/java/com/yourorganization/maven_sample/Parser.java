@@ -30,6 +30,7 @@ import com.github.javaparser.ast.expr.LambdaExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.MethodReferenceExpr;
 import com.github.javaparser.ast.expr.VariableDeclarationExpr;
+import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.stmt.ForStmt;
@@ -71,6 +72,7 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 
 /**
  * Some code that uses JavaParser.
@@ -84,8 +86,15 @@ public class Parser {
 	TypeSolver typeSolver = new ReflectionTypeSolver();
 	JavaSymbolSolver symbolSolver = new JavaSymbolSolver(typeSolver);
 
-	
-
+	//Config
+	private InputStream inputStream;
+	private Properties prop = new Properties();
+	private int allowDeleteMutations;
+	private int allowSwapMutations;
+	private int allowDuplicationMutations;
+	private int totalMutationProbabilities;
+	private int allowNoMutations;
+	private boolean allowInterproceduralMutations;
 	
 	private String filePath = new String();
 	public CompilationUnit cu = null;
@@ -93,9 +102,10 @@ public class Parser {
 	FileWriter mutationLogFile = null;
 	
 	
-	ArrayList<SwapMutation> swaps = new ArrayList<SwapMutation>();
+	ArrayList<Mutation> mutations = new ArrayList<Mutation>();
 	
 	private String callsDictPath = "calls.dict";
+	
 	
 	// ------------------------------------------------------------------------------
 	// 							CONSTRUCTOR
@@ -103,8 +113,9 @@ public class Parser {
 	/**
 	 * Constructor
 	 * @param filePath
+	 * @throws IOException 
 	 */
-	public Parser(String filePath) {
+	public Parser(String filePath){
 		//cu = sourceRoot.parse("", filePath);
 		this.filePath = filePath;
 		
@@ -119,12 +130,11 @@ public class Parser {
 		try {
 			String fileName = "output/" + cu.getStorage().get().getFileName() + "_mutationLog.csv";
 			this.mutationLogFile = new FileWriter(fileName);
+			this.generateMutationProperties("config.properties");
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-		
-		
 	}
 	
 	//------------------------------------------------------------------------------
@@ -132,10 +142,6 @@ public class Parser {
 	//------------------------------------------------------------------------------
 	
 	public CompilationUnit visitStatements(ArrayList<MethodCallExpr> allowedCalls) throws IOException {
-		
-		 //cu.findAll(MethodCallExpr.class).forEach(mce ->
-		 //mce.resolve().getSignature()));
-		
 		
 		ArrayList<MethodCallExpr> allowedCallsTest = (ArrayList<MethodCallExpr>) allowedCalls.clone();
 		
@@ -160,7 +166,7 @@ public class Parser {
 				ArrayList<MethodCallExpr> calls;
 				try {
 					calls = visitCalls(currentMethod, allowedCalls);
-					if(calls.size() > 1) {
+					if(calls.size() > 0) {
 						methodMutator(currentMethod, calls);
 					}
 					int r = 0;
@@ -251,8 +257,14 @@ public class Parser {
 		
 		ArrayList<MethodCallExpr> mutantCalls = (ArrayList<MethodCallExpr>) calls.clone();
 		MethodDeclaration method = m;
+		int allowDeleteMutations= this.allowDeleteMutations;
+		int allowSwapMutations = this.allowSwapMutations;
+		int allowDuplicationMutations = this.allowDuplicationMutations;
+		int allowNoMutations = this.allowNoMutations;
+		int totalMutations = this.totalMutationProbabilities;
 		
-		ArrayList<SwapMutation> swaps = new ArrayList<SwapMutation>();
+		
+		ArrayList<Mutation> mutations = new ArrayList<Mutation>();
 		
 		method.accept(new ModifierVisitor<MethodDeclaration>() {
 			
@@ -268,29 +280,53 @@ public class Parser {
 					ArrayList<MethodCallExpr> newCalls = (ArrayList<MethodCallExpr>) calls.clone();
 					newCalls.remove(n);
 					
-					if(newCalls.size() > 0) {
-						int randomIndex = (int) Math.random() * newCalls.size();
+					int randomMutation = 0;
+					int swapMutation = allowSwapMutations;
+					
+					if(newCalls.size() <= 1) {
+						randomMutation = (int) (Math.random() * (totalMutations - allowSwapMutations));
+						swapMutation = 0;
+					}
+					else {
+						randomMutation = (int) (Math.random() * totalMutations);
+					}
+					
+					
+					
+					
+					if(randomMutation < swapMutation) {
+						
+						int randomIndex = (int) (Math.random() * newCalls.size());
 						MethodCallExpr mutant = newCalls.get(randomIndex);
 						mutantCalls.remove(mutant);
 						
 
-						SwapMutation callSwap = new SwapMutation(cu.getStorage().get().getFileName(), n, mutant);
-						swaps.add(callSwap);
+						Mutation callSwap = new Mutation(cu.getStorage().get().getFileName(), "Swap", n, mutant);
+						mutations.add(callSwap);
 					
 						
 						return mutant;
+						
 					}
+					else if(randomMutation < swapMutation + allowDeleteMutations) {
+						Mutation callDelete = new Mutation(cu.getStorage().get().getFileName(), "Delete", n, n);
+						mutations.add(callDelete);
+						return null;
+					}/*
+					else if(randomMutation < swapMutation + allowDeleteMutations + allowDuplicationMutations) {
+						Mutation callDuplicate = new Mutation(cu.getStorage().get().getFileName(), "Duplicate", n, n);
+						mutations.add(callDuplicate);
+						return n;
+					}*/
 					else {
 						return n;
-					}
-					
-					
+					}	
 
 			}
 	
 		}, method);
 		
-		this.swaps.addAll(swaps);
+		this.mutations.addAll(mutations);
 	
 		return method;
 	
@@ -303,6 +339,8 @@ public class Parser {
 		try {
 			csvWriter.append("File Name");
 			csvWriter.append(",");
+			csvWriter.append("Mutation Type");
+			csvWriter.append(",");
 			csvWriter.append("Edited Line Number");
 			csvWriter.append(",");
 			csvWriter.append("Edited Call");
@@ -312,8 +350,8 @@ public class Parser {
 			csvWriter.append("New Call");
 			csvWriter.append("\n");
 		
-			this.swaps.forEach((swap) ->{
-				String lineContent = String.format("%s, %s, %s, %s, %s", swap.getJavaFile(), swap.getEditedLine(), swap.getEditedMethod(), swap.getSwapedLineNumber(), swap.getNewCall());
+			this.mutations.forEach((mutation) ->{
+				String lineContent = String.format("%s, %s, %s, %s, %s, %s", mutation.getJavaFile(), mutation.getMutationType(), mutation.getEditedLine(), mutation.getEditedMethod(), mutation.getSwapedLineNumber(), mutation.getNewCall());
 				try {
 					csvWriter.append(lineContent);
 					csvWriter.append("\n");
@@ -352,7 +390,77 @@ public class Parser {
 			e.printStackTrace();  
 		}
 		
+		if(this.allowInterproceduralMutations) {
+			APICalls.addAll(this.getInterProceduralMethods(APICalls));
+		}
+		
 		return APICalls;
+	}
+	
+	private ArrayList<String> getInterProceduralMethods(ArrayList<String> APICalls) {
+		ArrayList<String> APIDeclarationCalls = new ArrayList<String>();
+		
+		ArrayList<MethodCallExpr> calls = new ArrayList<MethodCallExpr>();
+		
+		this.cu.accept(new GenericVisitorAdapter<Integer, ArrayList<MethodCallExpr>>() {
+			
+			@Override
+			public Integer visit(MethodCallExpr n, ArrayList<MethodCallExpr> arg) {
+			
+					// Gets method name
+					String name = n.getNameAsString();
+					try {
+						String signature = n.resolve().getQualifiedSignature();
+						String APICall = signature.substring(0, signature.indexOf("." + name + "(")) + "#" + name;
+						if(APICalls.contains(APICall)) {
+							n.walk(Node.TreeTraversal.PARENTS, node -> {
+								if (node instanceof MethodDeclaration) {
+									try {
+										String declarationName = ((MethodDeclaration) node).getNameAsString();
+										String declarationSignature = ((MethodDeclaration) node).resolve().getQualifiedSignature();
+										String declarationCall = declarationSignature.substring(0, declarationSignature.indexOf("." + declarationName + "(")) + "#" + declarationName;
+										APIDeclarationCalls.add(declarationCall);
+									}catch(UnsolvedSymbolException e) {
+										
+									}
+								}
+							});
+						}
+					}catch(UnsolvedSymbolException e) {
+						
+					}
+		
+					return super.visit(n, arg);
+	
+			}
+	
+		}, calls);
+	
+		return APIDeclarationCalls;
+	}
+	
+	private void generateMutationProperties(String configFilePath) throws IOException{
+		try {
+			this.inputStream = getClass().getClassLoader().getResourceAsStream(configFilePath);
+			
+			if (this.inputStream != null) {
+				this.prop.load(inputStream);
+			} else {
+				throw new FileNotFoundException("property file '" + configFilePath + "' not found");
+			}
+			
+			this.allowDeleteMutations = Integer.parseInt(this.prop.getProperty("allowDeleteMutations")); 
+			this.allowSwapMutations = Integer.parseInt(this.prop.getProperty("allowSwapMutations")); 
+			this.allowDuplicationMutations = Integer.parseInt(this.prop.getProperty("allowDuplicationMutations")); 
+			this.allowInterproceduralMutations = Boolean.parseBoolean(this.prop.getProperty("allowInterproceduralMutations"));
+			this.allowNoMutations = Integer.parseInt(this.prop.getProperty("allowNoMutations")); 
+			this.totalMutationProbabilities = this.allowDeleteMutations + this.allowSwapMutations + this.allowDuplicationMutations + this.allowNoMutations;
+			
+		} catch (Exception e) {
+			System.out.println("Exception: " + e);
+		} finally {
+			this.inputStream.close();
+		}
 	}
 	
 	// https://stackoverflow.com/questions/31828851/how-to-write-a-java-program-to-filter-all-commented-lines-and-print-only-java-co
