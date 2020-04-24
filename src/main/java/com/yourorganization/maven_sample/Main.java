@@ -35,7 +35,7 @@ public class Main {
 	// 									MAIN
 	// ------------------------------------------------------------------------------
 	public static void main(String[] args) throws Exception {
-		pathToExplore = "C:\\Users\\Lucas\\Documents\\UDEM 2019-2020\\HIV 2020\\IFT3150\\jtar\\src\\main\\java\\org\\kamranzafar\\jtar";
+		pathToExplore = "C:\\Users\\Lucas\\Documents\\UDEM 2019-2020\\HIV 2020\\IFT3150\\htmlcompressor\\src\\main\\java";
 		searchThrough(new File(pathToExplore));
 		
 	}

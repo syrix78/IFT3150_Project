@@ -9,6 +9,7 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.Range;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -47,10 +48,14 @@ import com.github.javaparser.ast.visitor.ModifierVisitor;
 import com.github.javaparser.ast.visitor.Visitable;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.UnsolvedSymbolException;
+import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.resolution.types.ResolvedType;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
+import com.github.javaparser.symbolsolver.javaparsermodel.JavaParserFacade;
 import com.github.javaparser.symbolsolver.model.resolution.TypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JarTypeSolver;
+import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
 import com.github.javaparser.utils.CodeGenerationUtils;
 import com.github.javaparser.utils.SourceRoot;
@@ -83,8 +88,9 @@ public class Parser {
 	// 							VARIABLES
 	// ------------------------------------------------------------------------------
 	
-	TypeSolver typeSolver = new ReflectionTypeSolver();
-	JavaSymbolSolver symbolSolver = new JavaSymbolSolver(typeSolver);
+	//TypeSolver typeSolver = new ReflectionTypeSolver();
+	CombinedTypeSolver typeSolver = null;
+	JavaSymbolSolver symbolSolver = null;
 
 	//Config
 	private InputStream inputStream;
@@ -118,6 +124,18 @@ public class Parser {
 	public Parser(String filePath){
 		//cu = sourceRoot.parse("", filePath);
 		this.filePath = filePath;
+		
+		try {
+			this.typeSolver = new CombinedTypeSolver( 
+					  new ReflectionTypeSolver(),
+					  JarTypeSolver.getJarTypeSolver("guava-r08.jar"),
+					  JarTypeSolver.getJarTypeSolver("closure-compiler-r1043.jar")
+					); 
+			this.symbolSolver = new JavaSymbolSolver(typeSolver);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		
 		StaticJavaParser.getConfiguration().setSymbolResolver(this.symbolSolver);
 		try {
@@ -226,6 +244,9 @@ public class Parser {
 		
 		ArrayList<MethodCallExpr> calls = new ArrayList<MethodCallExpr>();
 		
+		CombinedTypeSolver solve = this.typeSolver;
+		
+		
 		this.cu.accept(new GenericVisitorAdapter<Integer, ArrayList<MethodCallExpr>>() {
 			
 			@Override
@@ -234,6 +255,9 @@ public class Parser {
 					// Gets method name
 					String name = n.getNameAsString();
 					try {
+						
+						String test2 = n.getTypeArguments().toString();;
+						String test = n.resolve().getSignature();
 						String signature = n.resolve().getQualifiedSignature();
 						String APICall = signature.substring(0, signature.indexOf("." + name + "(")) + "#" + name;
 						if(APICalls.contains(APICall)) {
@@ -312,13 +336,7 @@ public class Parser {
 						Mutation callDelete = new Mutation(cu.getStorage().get().getFileName(), "Delete", n, n);
 						mutations.add(callDelete);
 						return null;
-					}/*
-					else if(randomMutation < swapMutation + allowDeleteMutations + allowDuplicationMutations) {
-						Mutation callDuplicate = new Mutation(cu.getStorage().get().getFileName(), "Duplicate", n, n);
-						mutations.add(callDuplicate);
-						return n;
-					}*/
-					else {
+					} else {
 						return n;
 					}	
 
@@ -462,6 +480,8 @@ public class Parser {
 			this.inputStream.close();
 		}
 	}
+	
+	
 	
 	// https://stackoverflow.com/questions/31828851/how-to-write-a-java-program-to-filter-all-commented-lines-and-print-only-java-co
 	static void removeComments(Node node) {
